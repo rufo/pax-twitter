@@ -7,6 +7,8 @@ var sys = require('sys'),
   TwitterNode = require('twitter-node/lib/twitter-node').TwitterNode;
 
 var config = JSON.parse(fs.readFileSync("config.json", 'ascii'));
+
+var twitter_client = http.createClient(80, "api.twitter.com");
   
 var followed_user_tweets = {},
   followed_keyword_tweets = {};
@@ -36,11 +38,44 @@ fs.readFile("cache.json", function(err, data) {
   }
 });
 
-var pax_tweets = new TwitterNode({
-  user: config.username,
-  password: config.password,
-  track: config.follow_keywords,
-  follow: config.follow_users
+var screen_names_to_lookup = []
+
+for (var user_index in config.follow_users) {
+  var user = config.follow_users[user_index] + ""
+  if (user.substr(0,1) == "@") {
+    screen_names_to_lookup.push({str: user.substr(1), index: user_index});    
+  }
+}
+
+var num_screen_names_left = screen_names_to_lookup.length;
+
+screen_names_to_lookup.forEach(function(screen_name){
+  var req = twitter_client.request('GET', '/users/show.json?screen_name=' + encodeURIComponent(screen_name.str), {'host': 'api.twitter.com'});
+  req.on('response', function(response) {
+    if (response.statusCode == 200) {
+      var body = "";
+      response.setEncoding("utf8");
+      response.on("data", function(chunk) {
+        body += chunk;
+      });
+      response.on("end", function() {
+        var user_info = JSON.parse(body);
+        try {
+          console.log("Replacing @" + screen_name.str + " with user id " + user_info.id)
+          config.follow_users[screen_name.index] = user_info.id
+          num_screen_names_left--;
+          if (num_screen_names_left == 0) {
+            startStreaming();
+          }
+        } catch (err) {
+          console.log(sys.inspect(err));
+        }
+      });
+    } else {
+      console.log("Failed to get user id for @" + screen_name.str);
+    }
+  });
+  req.end();
 });
 
 function formatMessage(type, payload) {
@@ -142,30 +177,14 @@ function receivedTweet(tweet) {
   }
 }
 
-pax_tweets.addListener('tweet', function(tweet) {
-  receivedTweet(tweet);
-});
-
-pax_tweets.addListener('end', function(statusCode) {
-  console.log("Stream Closed with " + sys.inspect(statusCode));
-  setTimeout(pax_tweets.stream, 5000);
-});
-
-pax_tweets.addListener('error', function(err) {
-  console.log(sys.inspect(err));
-});
-
-
 function primeCache() {
-  var twitter_client = http.createClient(80, "twitter.com");
-
   for (var i in config.follow_users) {
     (function() {
       var user = config.follow_users[i];
       console.log("Queueing cache prime for " + user);
       setTimeout(function() {
         console.log("Executing cache prime for " + user);
-        var req = twitter_client.request('GET', '/statuses/user_timeline/' + user + '.json', {'host': 'twitter.com'});
+        var req = twitter_client.request('GET', '/statuses/user_timeline/' + user + '.json', {'host': 'api.twitter.com'});
         req.on('response', function(response) {
           if (response.statusCode == 200) {
             var body = "";
@@ -202,6 +221,30 @@ function primeCache() {
     })();
   }
 }
- 
-primeCache();
-pax_tweets.stream();
+
+function startStreaming() {
+  console.log("starting twitter streaming");
+  
+  var pax_tweets = new TwitterNode({
+    user: config.username,
+    password: config.password,
+    track: config.follow_keywords,
+    follow: config.follow_users
+  });
+
+  pax_tweets.addListener('tweet', function(tweet) {
+    receivedTweet(tweet);
+  });
+
+  pax_tweets.addListener('end', function(statusCode) {
+    console.log("Stream Closed with " + sys.inspect(statusCode));
+    setTimeout(pax_tweets.stream, 5000);
+  });
+
+  pax_tweets.addListener('error', function(err) {
+    console.log(sys.inspect(err));
+  });
+  
+  primeCache();
+  pax_tweets.stream();
+}
