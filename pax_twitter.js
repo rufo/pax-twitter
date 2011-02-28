@@ -222,10 +222,16 @@ function primeCache() {
   }
 }
 
+var pax_tweets;
+
+if ((screen_names_to_lookup.length == 0) && (typeof pax_tweets == "undefined")) {
+  startStreaming();
+}
+
 function startStreaming() {
   console.log("starting twitter streaming");
   
-  var pax_tweets = new TwitterNode({
+  pax_tweets = new TwitterNode({
     user: config.username,
     password: config.password,
     track: config.follow_keywords,
