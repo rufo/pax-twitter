@@ -154,6 +154,25 @@ function addToCache(arr, value) {
   }
 }
 
+function deleteFromCaches(id_str) {
+  for (var i in followed_user_tweets) {
+    followed_user_tweets[i] = followed_user_tweets[i].filter(function(tweet){
+      return (tweet.id_str != id_str); // return false (ie, filter out) if id_str matches
+    });
+  }
+
+  for (var i in followed_keyword_tweets) {
+    followed_keyword_tweets[i] = followed_keyword_tweets[i].filter(function(tweet){
+      return (tweet.id_str != id_str); // return false (ie, filter out) if id_str matches
+    });
+  }
+}
+
+function deleteTweet(tweet) {
+  deleteFromCaches(tweet.id_str);
+  broadcastData('delete', {id_str: tweet.id_str});
+}
+
 function receivedTweet(tweet) {
   if(inArray(config.follow_users, tweet.user.id)) {
     followed_user_tweets[tweet.user.id] = followed_user_tweets[tweet.user.id] || [];
@@ -241,6 +260,10 @@ function startStreaming() {
   pax_tweets.addListener('tweet', function(tweet) {
     receivedTweet(tweet);
   });
+
+  pax_tweets.addListener('delete', function(tweet){
+    deleteTweet(tweet.status);
+  })
 
   pax_tweets.addListener('end', function(statusCode) {
     console.log("Stream Closed with " + sys.inspect(statusCode));
