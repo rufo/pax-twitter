@@ -44,10 +44,9 @@ for (var user_index in config.follow_users) {
   var user = config.follow_users[user_index] + ""
   if (user.substr(0,1) == "@") {
     screen_names_to_lookup.push({str: user.substr(1), index: user_index});    
+    config.follow_users[user_index] = "";
   }
 }
-
-var num_screen_names_left = screen_names_to_lookup.length;
 
 screen_names_to_lookup.forEach(function(screen_name){
   var req = twitter_client.request('GET', '/users/show.json?screen_name=' + encodeURIComponent(screen_name.str), {'host': 'api.twitter.com'});
@@ -63,10 +62,12 @@ screen_names_to_lookup.forEach(function(screen_name){
         try {
           console.log("Replacing @" + screen_name.str + " with user id " + user_info.id)
           config.follow_users[screen_name.index] = user_info.id
-          num_screen_names_left--;
-          if (num_screen_names_left == 0) {
-            startStreaming();
-          }
+          primeCacheForUser(user_info.id);
+          setTimeout(function(){
+            pax_tweets.follow(user_info.id).stream();
+            console.log("reset stream OK");
+          }, 2000);
+          
         } catch (err) {
           console.log(sys.inspect(err));
         }
@@ -196,84 +197,82 @@ function receivedTweet(tweet) {
   }
 }
 
-function primeCache() {
-  for (var i in config.follow_users) {
-    (function() {
-      var user = config.follow_users[i];
-      console.log("Queueing cache prime for " + user);
-      setTimeout(function() {
-        console.log("Executing cache prime for " + user);
-        var req = twitter_client.request('GET', '/statuses/user_timeline/' + user + '.json', {'host': 'api.twitter.com'});
-        req.on('response', function(response) {
-          if (response.statusCode == 200) {
-            var body = "";
-            response.setEncoding("utf8");
-            response.on("data", function(chunk) {
-              body += chunk;
-            });
-            response.on("end", function() {
-              try {
-                var timeline = JSON.parse(body);
-                timeline.sort(function(a,b) {
-                  return a.id - b.id;
-                });
+function primeCacheForUser(user) {
+  console.log("Executing cache prime for " + user);
+  var req = twitter_client.request('GET', '/statuses/user_timeline/' + user + '.json', {'host': 'api.twitter.com'});
+  req.on('response', function(response) {
+    if (response.statusCode == 200) {
+      var body = "";
+      response.setEncoding("utf8");
+      response.on("data", function(chunk) {
+        body += chunk;
+      });
+      response.on("end", function() {
+        try {
+          var timeline = JSON.parse(body);
+          timeline.sort(function(a,b) {
+            return a.id - b.id;
+          });
 
-                var low_id = 0;
-                followed_user_tweets[user] = followed_user_tweets[user] || []
-                if (followed_user_tweets[user].length > 0)
-                  low_id = followed_user_tweets[user][followed_user_tweets[user].length-1].id;
-                for(var j in timeline) {
-                  if(!idInArray(followed_user_tweets[user], timeline[j].id) && timeline[j].id > low_id) {
-                    receivedTweet(timeline[j]);
-                  }
-                } 
-              } catch (err) {
-                console.log(sys.inspect(err));
-              }
-            });
-          } else {
-            console.log("Failed to collect status for " + user);
-          }
-        });
-        req.end();
-      }, 1000 * i);
-    })();
-  }
+          var low_id = 0;
+          followed_user_tweets[user] = followed_user_tweets[user] || []
+          if (followed_user_tweets[user].length > 0)
+            low_id = followed_user_tweets[user][followed_user_tweets[user].length-1].id;
+          for(var j in timeline) {
+            if(!idInArray(followed_user_tweets[user], timeline[j].id) && timeline[j].id > low_id) {
+              receivedTweet(timeline[j]);
+            }
+          } 
+        } catch (err) {
+          console.log(sys.inspect(err));
+        }
+      });
+    } else {
+      console.log("Failed to collect status for " + user);
+    }
+  });
+  req.end();
 }
+
 
 var pax_tweets;
 
-if ((screen_names_to_lookup.length == 0) && (typeof pax_tweets == "undefined")) {
-  startStreaming();
+console.log("starting twitter streaming");
+
+initial_follow = config.follow_users.filter(function(e) {e != ""});
+if (initial_follow.length == 0) {
+  initial_follow = null;
 }
 
-function startStreaming() {
-  console.log("starting twitter streaming");
-  
-  pax_tweets = new TwitterNode({
-    user: config.username,
-    password: config.password,
-    track: config.follow_keywords,
-    follow: config.follow_users
-  });
+pax_tweets = new TwitterNode({
+  user: config.username,
+  password: config.password,
+  track: config.follow_keywords,
+  follow: initial_follow
+});
 
-  pax_tweets.addListener('tweet', function(tweet) {
-    receivedTweet(tweet);
-  });
+pax_tweets.addListener('tweet', function(tweet) {
+  receivedTweet(tweet);
+});
 
-  pax_tweets.addListener('delete', function(tweet){
-    deleteTweet(tweet.status);
-  })
+pax_tweets.addListener('delete', function(tweet){
+  deleteTweet(tweet.status);
+})
 
-  pax_tweets.addListener('end', function(statusCode) {
-    console.log("Stream Closed with " + sys.inspect(statusCode));
-    setTimeout(pax_tweets.stream, 5000);
-  });
+pax_tweets.addListener('end', function(statusCode) {
+  console.log("Stream Closed with " + sys.inspect(statusCode));
+  setTimeout(pax_tweets.stream, 5000);
+});
 
-  pax_tweets.addListener('error', function(err) {
-    console.log(sys.inspect(err));
-  });
-  
-  primeCache();
-  pax_tweets.stream();
+pax_tweets.addListener('error', function(err) {
+  console.log(sys.inspect(err));
+});
+
+for (var i in initial_follow) {
+  console.log("Queueing cache prime for " + user);
+  setTimeout(function() {
+    primeCacheForUser(config.follow_users[i]);
+  }, 1000 * i);
 }
+
+pax_tweets.stream();
