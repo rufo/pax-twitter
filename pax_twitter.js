@@ -260,8 +260,10 @@ pax_tweets.addListener('delete', function(tweet){
 })
 
 pax_tweets.addListener('end', function(statusCode) {
-  console.log("Stream Closed with " + sys.inspect(statusCode));
-  setTimeout(function(){pax_tweets.stream()}, 5000);
+  // commented to prevent infinite reconnects
+  // twitter-node sends end events on every .stream() request
+  // console.log("Stream Closed with " + sys.inspect(statusCode));
+  // setTimeout(function(){pax_tweets.stream()}, 5000);
 });
 
 pax_tweets.addListener('error', function(err) {
